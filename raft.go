@@ -82,8 +82,10 @@ func (rf *Raft) RequestVote(args VoteArgs, reply *VoteReply) error {
 	}
 
 	if rf.votedFor == -1 {
+		rf.mu.Lock()
 		rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateID
+		rf.mu.Unlock()
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 	}
@@ -149,7 +151,7 @@ func (rf *Raft) start() {
 
 	go func() {
 		rand.Seed(time.Now().UnixNano())
-		time.Sleep(2 * time.Second)
+		// time.Sleep(2 * time.Second)
 
 		for {
 			switch rf.state {
@@ -177,7 +179,9 @@ func (rf *Raft) start() {
 				go rf.broadcastRequestVote()
 
 				select {
-				case <-time.After(time.Duration(rand.Intn(500-300)+500) * time.Millisecond):
+				// case <-time.After(time.Duration(rand.Intn(500-300)+500) * time.Millisecond):
+				case <-time.After(time.Duration(500) * time.Millisecond):
+
 					rf.state = Follower
 				case <-rf.toLeaderC:
 					fmt.Printf("Node: %d, I'm leader\n", rf.me)
@@ -247,8 +251,11 @@ func (rf *Raft) sendRequestVote(serverID int, args VoteArgs, reply *VoteReply) {
 	// 当前candidate节点无效
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if rf.state != Candidate {
+		return
+	}
 	if reply.Term > rf.currentTerm {
-		log.Printf("Back to follower as got higher term %v for candidate", reply.Term)
+		log.Printf("Back to follower as got higher term %v from remote", reply.Term)
 		rf.currentTerm = reply.Term
 		rf.state = Follower
 		rf.votedFor = -1
