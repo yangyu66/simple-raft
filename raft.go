@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/rpc"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type LogEntry struct {
 // Raft Node
 type Raft struct {
 	me int
+	mu sync.Mutex
 
 	nodes map[int]*node
 
@@ -69,6 +71,9 @@ type Raft struct {
 
 // RequestVote rpc method
 func (rf *Raft) RequestVote(args VoteArgs, reply *VoteReply) error {
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
@@ -143,28 +148,36 @@ func (rf *Raft) start() {
 	rf.toLeaderC = make(chan bool)
 
 	go func() {
-
 		rand.Seed(time.Now().UnixNano())
+		time.Sleep(2 * time.Second)
 
 		for {
 			switch rf.state {
 			case Follower:
+				wait := 800
+				if rf.me == 1 {
+					wait = 200
+				}
 				select {
 				case <-rf.heartbeatC:
 					log.Printf("follower-%d recived heartbeat\n", rf.me)
-				case <-time.After(time.Duration(rand.Intn(500-300)+300) * time.Millisecond):
+				case <-time.After(time.Duration(rand.Intn(500-300)+wait) * time.Millisecond):
+					// case <-time.After(time.Duration(rand.Intn(500-300)+500) * time.Millisecond):
+
 					log.Printf("follower-%d timeout\n", rf.me)
 					rf.state = Candidate
 				}
 			case Candidate:
-				fmt.Printf("Node: %d, I'm candidate\n", rf.me)
+				log.Printf("Node: %d, I'm candidate for term %d\n", rf.me, rf.currentTerm)
+				rf.mu.Lock()
 				rf.currentTerm++
 				rf.votedFor = rf.me
 				rf.voteCount = 1
+				rf.mu.Unlock()
 				go rf.broadcastRequestVote()
 
 				select {
-				case <-time.After(time.Duration(rand.Intn(500-300)+300) * time.Millisecond):
+				case <-time.After(time.Duration(rand.Intn(500-300)+500) * time.Millisecond):
 					rf.state = Follower
 				case <-rf.toLeaderC:
 					fmt.Printf("Node: %d, I'm leader\n", rf.me)
@@ -224,14 +237,18 @@ func (rf *Raft) broadcastRequestVote() {
 func (rf *Raft) sendRequestVote(serverID int, args VoteArgs, reply *VoteReply) {
 	client, err := rpc.DialHTTP("tcp", rf.nodes[serverID].address)
 	if err != nil {
-		log.Fatal("dialing: ", err)
+		log.Println("dialing: ", err)
+		return
 	}
 
 	defer client.Close()
 	client.Call("Raft.RequestVote", args, reply)
 
 	// 当前candidate节点无效
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if reply.Term > rf.currentTerm {
+		log.Printf("Back to follower as got higher term %v for candidate", reply.Term)
 		rf.currentTerm = reply.Term
 		rf.state = Follower
 		rf.votedFor = -1
@@ -296,7 +313,8 @@ func (rf *Raft) broadcastHeartbeat() {
 func (rf *Raft) sendHeartbeat(serverID int, args HeartbeatArgs, reply *HeartbeatReply) {
 	client, err := rpc.DialHTTP("tcp", rf.nodes[serverID].address)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		log.Println("HEART BEAT dialing:", err)
+		return
 	}
 
 	defer client.Close()
