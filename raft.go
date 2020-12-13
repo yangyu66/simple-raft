@@ -82,10 +82,8 @@ func (rf *Raft) RequestVote(args VoteArgs, reply *VoteReply) error {
 	}
 
 	if rf.votedFor == -1 {
-		rf.mu.Lock()
 		rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateID
-		rf.mu.Unlock()
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 	}
@@ -151,7 +149,7 @@ func (rf *Raft) start() {
 
 	go func() {
 		rand.Seed(time.Now().UnixNano())
-		// time.Sleep(2 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		for {
 			switch rf.state {
